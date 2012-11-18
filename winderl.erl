@@ -20,7 +20,7 @@
 -behaviour(gen_server).
 
 %% API
--export([start_link/4, stream_update/1,current_window/0, external_state/0]).
+-export([start_link/5, update/1,current_window/0, external_state/0]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
@@ -47,7 +47,7 @@
 %% @doc
 %%  Updates the current window with new data
 %% @end
-stream_update(Data) ->
+update(Data) ->
     gen_server:cast(?SERVER,{incoming_data,Data}).
 
 %% @doc Returns the data in the current window
@@ -61,17 +61,18 @@ external_state() ->
 %% @doc
 %% Starts the server
 %%--------------------------------------------------------------------
--spec start_link(WinSize :: timeframe(), UpdateFun :: fun(), ExpireFun :: fun()|undefined, ExternalState :: any()) -> {ok,pid()}| ignore | {error,Error :: any()}.
-start_link(WinSize, UpdateFun,ExpireFun,ExternalState) ->
-    gen_server:start_link({local, ?SERVER}, ?MODULE, [{WinSize, UpdateFun, ExpireFun, ExternalState}], []).
+-spec start_link(WinSize :: timeframe(), UpdateFun :: fun(), ExpireFun :: fun()|undefined, ExternalState :: any(), Precision :: integer()) -> {ok,pid()}| ignore | {error,Error :: any()}.
+start_link(WinSize, UpdateFun,ExpireFun,ExternalState,Precision) ->
+    gen_server:start_link({local, ?SERVER}, ?MODULE, [{WinSize, UpdateFun, ExpireFun, ExternalState,Precision}], []).
 
 
 %%%===================================================================
 %%% gen_server callbacks
 %%%===================================================================
 
-init([{WinSize, UpdateFun,ExpireFun,ExternalState}]) ->
-    {ok,TRef} = timer:send_interval(1, check_expired),
+init([{WinSize, UpdateFun,ExpireFun,ExternalState,Precision}]) ->
+    
+    {ok,{interval,TRef}} = timer:send_interval(1*Precision, check_expired),
     {ok, #state
      {
        window_length=WinSize, 
@@ -87,10 +88,7 @@ handle_call(external_state, _From, #state{external_state = ExtState} = State) ->
     {reply, ExtState, State};
 
 handle_call(current_state, _From, #state{current_window = Window} = State) ->
-    Out = lists:map(fun({T,D}) ->
-			    {calendar:gregorian_seconds_to_date_time(T*1000),D}
-		    end, Window),
-    {reply, Out, State};
+    {reply, Window, State};
 
 handle_call(_Request, _From, State) ->
     Reply = ok,
@@ -108,17 +106,17 @@ handle_cast(_Msg, State) ->
 %% @end
 handle_info(check_expired, #state{current_window = W, window_length_in_ms = MS, expired_fun=ExpFun, external_state = ExtState} = State) ->
     {NewWin, NewExtState} = process_expired(W,MS,ExtState,ExpFun),
-    {noreply,State#state{current_window = NewWin, external_state = NewExtState}};
+    {noreply, State#state{current_window = NewWin, external_state = NewExtState}};
 
 handle_info(_Info, State) ->
     {noreply, State}.
 
 terminate(_Reason, #state{check_expired_timer = T} = _State) ->
     case T of
-	undefined ->
-	    void;
-	_ ->
-	    timer:exit(T)
+    	undefined ->
+    	    void;
+    	_ ->
+    	    timer:cancel(T)
     end,
     ok.
 
@@ -143,20 +141,25 @@ get_old_data(Data, WinSize) ->
 %% @end
 process_expired(Window, MS, ExtState, ExpFun) ->
     ExpiredData = get_old_data(Window,MS),
-    case ExpFun of
-	undefined -> 
-	    {lists:subtract(Window,ExpiredData),ExtState};
+    case ExpiredData of
+	[] ->
+	    {Window,ExtState};
 	_ ->
-	    lists:foreach(fun({_T,D}) ->
-				  case ExtState of
-				      undefined ->
-					  ExpFun(D),
-					  {lists:subtract(Window,ExpiredData),ExtState};
-				      _ ->
-					  NewExtState = ExpFun(D,ExtState),
-					  {lists:subtract(Window,ExpiredData),NewExtState}
-				  end
-			  end,ExpiredData)
+	    case ExpFun of
+		undefined -> 
+		    {lists:subtract(Window,ExpiredData),ExtState};
+		_ ->
+		    lists:foldl(fun({_T,D},{W,E}) ->
+					case E of
+					    undefined ->
+						ExpFun(D),
+						{[W|lists:subtract(Window,ExpiredData)],E};
+					    _ ->
+						NewExtState = ExpFun(D,E),
+						{[W|lists:subtract(Window,ExpiredData)],NewExtState}
+					end
+					  end,{[],ExtState},ExpiredData)		    
+	    end
     end.
 
 %% @doc
