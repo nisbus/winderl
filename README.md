@@ -21,11 +21,11 @@ Example:
   
 Start the server with a window length of one minute and print out data as it arrives and again when it expires.  
 ```erlang  
-winderl:start_link({0,1,0}, fun(X) -> io:format("Data received: ~p~n",[X]) end, fun(X) -> io:format("Data expired: ~p~n",[X]) end, undefined).
+winderl:start_link({0,1,0}, fun(X) -> io:format("Data received: ~p~n",[X]) end, fun(X) -> io:format("Data expired: ~p~n",[X]) end, undefined,100).
 ```  
   
 ```erlang  
-winderl:stream_update("First data inserted").
+winderl:update("First data inserted").
 ```  
   
 Now you should see "Data received: First data inserted" printed on the console and  
