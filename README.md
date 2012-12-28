@@ -1,3 +1,5 @@
+[![Build Status](https://travis-ci.org/nisbus/winderl.png?branch=master)](https://travis-ci.org/nisbus/winderl)  
+
 winderl
 =======
 
